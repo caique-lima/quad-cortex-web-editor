@@ -1,0 +1,51 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Needed by actions/deploy-pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push replaces a queued one but never cancels one that is running.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Generates the protobuf TypeScript (it is not committed).
+      - run: npm run gen
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          # A project page is served from https://<user>.github.io/<repo>/
+          BASE_PATH: /${{ github.event.repository.name }}/
+          # Shown in the app so people using the hosted copy can find the source (AGPL-3.0, section 13).
+          VITE_REPO_URL: https://github.com/${{ github.repository }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

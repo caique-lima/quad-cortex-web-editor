@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.base.json", "compilerOptions": { "noEmit": true, "jsx": "react-jsx", "types": ["w3c-web-hid", "vite/client"] }, "include": ["src"] }
