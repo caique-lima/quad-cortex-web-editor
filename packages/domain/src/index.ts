@@ -6,3 +6,4 @@ export * from './ports';
 export * from './restore';
 export * from './restore-exec';
 export * from './io';
+export * from './perform';

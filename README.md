@@ -9,6 +9,10 @@ for interoperability with hardware you own. Quad Cortex and Cortex Control are t
 > reloads the saved version, but the protocol has no version number and has only been checked on **CorOS 4.1.0** (by the author)
 > and **4.0.1** (by the community). Back up presets you care about with Cortex Control first, and try new features on a scratch preset.
 
+![Edit mode on a desktop, connected to a Quad Cortex: scenes on the left, the lane's blocks as cards in the middle, the selected block's controls on the right](docs/screenshot-edit.png)
+
+*Edit mode on a desktop, connected to a Quad Cortex running factory preset "Brit 2203".*
+
 ## What it does
 
 **Verified on a real unit (CorOS 4.1.0):**
@@ -33,14 +37,21 @@ for interoperability with hardware you own. Quad Cortex and Cortex Control are t
 
 **Safety rails:** the one block known to crash the unit (`NC_Recorder`) can never be placed; port numbers the unit doesn't define are never written; edits to a lane that can't branch are refused; the unit's factory, downloads and cloud folders are read-only here.
 
+## Look and feel
+
+One dark theme (following the Quad Cortex's own style), square corners, and Inter. Colour carries meaning only: the family of each block (amp, drive, delay…) and the scene. Inter is bundled with the app, so nothing is fetched from a font service and it works offline.
+
+- **Edit mode:** on a phone, a scene strip on top, lane tabs, and a vertical list of the lane's eight slots where tapping a block expands its parameters in place. On a desktop, scenes down the left, the lane as cards in the middle (the selected block shows its value bars), and a block inspector on the right with its actions pinned at the bottom.
+- **Perform mode** (switch at the top, same place on every screen; remembered in this browser): huge scene buttons, up to three pinned blocks as big on/off buttons, master volume, and previous/next preset. Nothing in it edits a preset, and it asks the browser to keep the screen on. Pin blocks from Edit mode with *Pin to Perform*; with nothing pinned it picks the first drive, delay and reverb.
+
 ## Using it
 
 You need desktop **Chrome, Edge or Opera** (WebHID), a Quad Cortex connected by USB and fully booted, and **Cortex Control closed** (it holds the USB interface exclusively).
 
 1. Open the app and click **Connect Quad Cortex…**, then choose the device in the browser's prompt.
 2. Wait for the current preset to appear; it can take up to ~25 seconds. The **Library** works meanwhile.
-3. Tabs: **Preset** (grid, scenes, undo), **Library**, **Settings** (global I/O), **Diagnostics** (device info, log, snapshots).
-4. Tap a block for its parameters, an empty cell to add a block, a row number for that lane's routing and levels.
+3. Sections: **Preset** (lanes, blocks, scenes, undo), **Library**, **Settings** (global I/O), **Diagnostics** (device info, log, snapshots). Use the **Edit / Perform** switch for stage use.
+4. Tap a block for its parameters, an empty slot to add a block, *Lane settings* for that lane's routing, levels and branching, and *Scenes* to rename, recolour or copy scenes.
 
 No unit handy? Add `?demo` to the address for a fake unit with synthetic presets (it uses the real block catalog captured from a unit).
 `?cc=<version>` overrides the Cortex Control version the app announces to the unit (default `4.1.0`; CorOS 4.1.0 rejects `4.0.1`).

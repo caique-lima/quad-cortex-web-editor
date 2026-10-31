@@ -1,135 +1,212 @@
-import { useMemo, useState } from 'react';
-import { buildGrid, type GridCell, type GridParam } from '@qc/domain';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { buildGrid, inputLabel, outputLabel, type GridCell } from '@qc/domain';
+import { optionCount } from '@qc/protocol';
 import { connection, useDevice } from '../connection';
+import { useMediaQuery } from '../hooks';
+import { samePin, type Pin } from '../perform';
+import { familyOf } from '../theme';
+import { BlockInspector } from './BlockInspector';
 import { BlockPicker } from './BlockPicker';
-import { SceneSheet } from './SceneSheet';
 import { LaneSheet } from './LaneSheet';
-import { ParamControl } from './ParamControl';
-import { inputLabel, outputLabel } from '@qc/domain';
+import { SceneSheet } from './SceneSheet';
 
-export function PresetView() {
+const two = (n: number) => String(n).padStart(2, '0');
+
+function summary(c: GridCell): string {
+  if (c.bypassed) return c.bypassPerScene ? 'Bypassed in this scene' : 'Bypassed';
+  return c.params.filter((p) => !p.hidden).slice(0, 3).map((p) => `${p.name ?? `#${p.index}`} ${p.display.text}`).join(' · ');
+}
+
+/** Position bars for the first few continuous parameters (0..1 on the knob), shown for the selected block. */
+function bars(c: GridCell): number[] {
+  return c.params
+    .filter((p) => !p.hidden && typeof p.value === 'number' && p.display.converted && p.meta && optionCount(p.meta) === undefined && p.meta.type !== 'string' && p.meta.type !== 'int')
+    .slice(0, 3)
+    .map((p) => Math.max(0, Math.min(1, p.value as number)));
+}
+
+export function PresetView({ pins, onTogglePin }: { pins: Pin[]; onTogglePin: (p: Pin) => void }) {
   const dev = useDevice();
-  const [picked, setPicked] = useState<{ row: number; column: number } | null>(null);
+  const desktop = useMediaQuery('(min-width: 1000px)');
+  const [lane, setLane] = useState(0);
+  const [picked, setPicked] = useState<Pin | null>(null);
   const [picking, setPicking] = useState<{ row: number; column: number; replacing?: string } | null>(null);
   const [moving, setMoving] = useState<{ row: number; column: number; name: string } | null>(null);
   const [scenes, setScenes] = useState(false);
-  const [lane, setLane] = useState<number | null>(null);
+  const [laneSheet, setLaneSheet] = useState(false);
   const [error, setError] = useState<string>();
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const grid = useMemo(
     () => (dev.preset ? buildGrid(dev.preset, dev.catalog, dev.selectedScene) : undefined),
     [dev.preset, dev.catalog, dev.selectedScene],
   );
+  useEffect(() => setPicked(null), [lane]);
 
   if (!grid) {
     return (
-      <div className="card" role="status">
-        <h2>Waiting for the current preset…</h2>
-        <p className="muted">The unit sends the loaded preset a few seconds after connecting (it can take up to ~25 s). You can already browse the Library.</p>
+      <div className="pad">
+        <div className="card" role="status">
+          <h2>Waiting for the current preset</h2>
+          <p className="muted">The unit sends the loaded preset a few seconds after connecting (it can take up to about 25 seconds). You can already use the Library.</p>
+        </div>
       </div>
     );
   }
-  const cell = picked ? grid[picked.row]?.cells[picked.column] : undefined;
-  const tapCell = (c: GridCell) => {
+
+  const row = grid[lane]!;
+  const busy = dev.loadingPreset || dev.structuralPending;
+  const pickedCell = picked && picked.row === lane ? row.cells[picked.column] : undefined;
+  // On a desktop the inspector always has something to show: the picked block, else the first block in the lane.
+  const selCell = pickedCell && !pickedCell.empty ? pickedCell : desktop ? row.cells.find((c) => !c.empty) : undefined;
+  const isSel = (c: GridCell) => !!selCell && selCell.row === c.row && selCell.column === c.column && !c.empty;
+  const isPinned = (c: GridCell) => pins.some((p) => samePin(p, c));
+
+  const tap = (c: GridCell) => {
     setError(undefined);
     if (moving) {
       if (!c.empty) return;
       connection.store.moveBlock(moving.row, moving.column, c.row, c.column).catch(fail);
       setMoving(null);
-    } else if (c.empty) setPicking({ row: c.row, column: c.column });
-    else setPicked({ row: c.row, column: c.column });
+      setPicked({ row: c.row, column: c.column });
+      return;
+    }
+    if (c.empty) { setPicking({ row: c.row, column: c.column }); return; }
+    setPicked(!desktop && picked && samePin(picked, c) ? null : { row: c.row, column: c.column });
   };
+  const toggle = (c: GridCell) => connection.store.setBypass(c.row, c.column, !c.bypassed).catch(fail);
+  const inspector = (c: GridCell, compact: boolean) => (
+    <BlockInspector
+      cell={c} compact={compact} pinned={isPinned(c)} onPin={() => onTogglePin({ row: c.row, column: c.column })}
+      onReplace={() => setPicking({ row: c.row, column: c.column, replacing: c.name })}
+      onMove={() => { setMoving({ row: c.row, column: c.column, name: c.name }); if (!desktop) setPicked(null); }}
+      onRemove={() => { if (confirm(`Remove ${c.name}? This is live and unsaved until you save.`)) { connection.store.removeBlock(c.row, c.column).catch(fail); setPicked(null); } }}
+    />
+  );
 
-  return (
-    <>
-      <div className="toolbar">
-        <button onClick={() => setScenes(true)}>Scenes…</button>
-        <button disabled={!dev.undoCount || dev.loadingPreset} onClick={() => connection.store.undo().catch(fail)} aria-label="Undo">↶ Undo</button>
-        <button disabled={!dev.redoCount || dev.loadingPreset} onClick={() => connection.store.redo().catch(fail)} aria-label="Redo">↷ Redo</button>
-        {moving && <span className="movebar" role="status">Tap an empty cell to move “{moving.name}” there. <button onClick={() => setMoving(null)}>Cancel</button></span>}
-      </div>
-      {error && <div className="inline-err" role="alert">{error}</div>}
-      <div className={`grid ${dev.loadingPreset || dev.structuralPending ? 'loading' : ''}`}>
-        {grid.map((row) => (
-          <div className="row" key={row.row}>
-            <button className="rowlabel" onClick={() => setLane(row.row)} aria-label={`Lane ${row.row + 1} routing`}
-              title={`Lane ${row.row + 1}: ${inputLabel(row.inPort)} → ${outputLabel(row.outPort)}`}>{row.row + 1}</button>
-            {row.cells.map((c) => (
-              <button
-                key={c.column}
-                className={`cell ${c.empty ? 'empty' : ''} ${c.bypassed ? 'bypassed' : ''} ${c.unknown ? 'unknown' : ''} ${moving && c.empty ? 'target' : ''}`}
-                disabled={dev.loadingPreset || (moving ? !c.empty : false)}
-                onClick={() => tapCell(c)}
-                title={c.empty ? 'Add a block' : c.category}
-                aria-label={c.empty ? `Empty, row ${c.row + 1} column ${c.column + 1}` : undefined}
-              >
-                {c.empty ? <span className="plus">+</span> : <><span className="name">{c.name}</span>{c.bypassed && <small>bypassed{c.bypassPerScene ? ' (scene)' : ''}</small>}</>}
-              </button>
-            ))}
-          </div>
+  const laneBar = (
+    <div className="lanebar">
+      <div className="lanetabs" role="tablist" aria-label="Lanes">
+        {[0, 1, 2, 3].map((i) => (
+          <button key={i} role="tab" aria-selected={lane === i} className={lane === i ? 'on' : ''} onClick={() => setLane(i)}>Lane {i + 1}</button>
         ))}
       </div>
-      {cell && !cell.empty && (
-        <BlockSheet cell={cell} onClose={() => setPicked(null)}
-          onReplace={() => { setPicking({ row: cell.row, column: cell.column, replacing: cell.name }); setPicked(null); }}
-          onMove={() => { setMoving({ row: cell.row, column: cell.column, name: cell.name }); setPicked(null); }}
-          onRemove={() => { if (confirm(`Remove ${cell.name}? This is live and unsaved until you save.`)) { connection.store.removeBlock(cell.row, cell.column).catch(fail); setPicked(null); } }} />
-      )}
-      {picking && <BlockPicker {...picking} onClose={() => setPicking(null)} />}
-      {scenes && <SceneSheet onClose={() => setScenes(false)} />}
-      {lane !== null && <LaneSheet row={lane} onClose={() => setLane(null)} />}
-    </>
-  );
-}
-
-function BlockSheet({ cell, onClose, onReplace, onMove, onRemove }: { cell: GridCell; onClose: () => void; onReplace: () => void; onMove: () => void; onRemove: () => void }) {
-  const dev = useDevice();
-  const [error, setError] = useState<string>();
-  const model = cell.hash !== undefined ? dev.catalog?.models.get(cell.hash) : undefined;
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
-  const locked = dev.loadingPreset;
-  return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-label={cell.name} onClick={(e) => e.stopPropagation()}>
-        <div className="sheet-head">
-          <div>
-            <strong>{cell.name}</strong>
-            <div className="muted small">{[cell.category, model?.basedOn].filter(Boolean).join(' · ')} · row {cell.row + 1}, col {cell.column + 1}</div>
-          </div>
-          <button onClick={onClose}>Close</button>
-        </div>
-        <div className="actions">
-          <button className={cell.bypassed ? '' : 'on'} disabled={locked}
-            onClick={() => connection.store.setBypass(cell.row, cell.column, !cell.bypassed).catch(fail)}>
-            {cell.bypassed ? 'Bypassed — tap to enable' : 'Enabled — tap to bypass'}
-          </button>
-          {cell.bypassed && !cell.bypassPerScene && <small className="muted">bypass applies to all scenes for this block</small>}
-        </div>
-        <div className="actions">
-          <button disabled={locked} onClick={onReplace}>Replace…</button>
-          <button disabled={locked} onClick={onMove}>Move…</button>
-          <button disabled={locked} onClick={onRemove}>Remove</button>
-        </div>
-        {error && <div className="inline-err" role="alert">{error}</div>}
-        {cell.params.length === 0 ? <p className="muted">No parameters sent for this block.</p> : (
-          <div className="params">
-            {cell.params.filter((p) => !p.hidden).map((p) => <ParamRow key={p.index} cell={cell} p={p} disabled={locked} onError={fail} />)}
-          </div>
-        )}
-        <p className="muted small">
-          Changes are applied live on the unit and are <b>not saved</b> — use “Discard changes” in the header to go back to the saved preset.
-          Per-scene parameters change the active scene ({dev.selectedScene + 1}) only.
-        </p>
+      <div className="lanetools">
+        <span className="route">{inputLabel(row.inPort)} → {outputLabel(row.outPort)}</span>
+        <button onClick={() => setLaneSheet(true)}>Lane settings</button>
+        <button onClick={() => setScenes(true)}>Scenes</button>
       </div>
     </div>
   );
-}
+  const banners = (
+    <>
+      {moving && (
+        <div className="movebar" role="status">
+          <span>Choose an empty slot to move “{moving.name}” to. Other lanes: use the lane tabs.</span>
+          <button onClick={() => setMoving(null)}>Cancel</button>
+        </div>
+      )}
+      {error && <div className="errbar" role="alert">{error}</div>}
+    </>
+  );
 
-function ParamRow({ cell, p, disabled, onError }: { cell: GridCell; p: GridParam; disabled: boolean; onError: (e: unknown) => void }) {
-  const label = `${cell.name} ${p.name ?? `#${p.index}`}`;
+  const list = (
+    <div className={`chain ${busy ? 'loading' : ''}`}>
+      {row.cells.map((c) => {
+        const fam = familyOf(c.category);
+        const style = { '--fam': fam.color } as CSSProperties;
+        if (c.empty) {
+          return (
+            <div key={c.column} className={`blk empty ${moving ? 'target' : ''}`}>
+              <div className="blk-row">
+                <button className="blk-open" onClick={() => tap(c)} disabled={busy} aria-label={`Empty slot ${c.column + 1}, add a block`}>
+                  <span className="col">{two(c.column + 1)}</span>
+                  <span>{moving ? `Move “${moving.name}” here` : 'Add a block'}</span>
+                </button>
+              </div>
+            </div>
+          );
+        }
+        const open = isSel(c);
+        return (
+          <div key={c.column} className={`blk ${open ? 'sel' : ''} ${c.bypassed ? 'byp' : ''} ${c.unknown ? 'unknown' : ''}`} style={style}>
+            <div className="blk-row">
+              <button className="blk-open" onClick={() => tap(c)} aria-expanded={open} disabled={busy || !!moving}>
+                <span className="col">{two(c.column + 1)}</span>
+                <span className="meta">
+                  <span className="fam">{fam.label}</span>
+                  <span className="nm">{c.name}</span>
+                  <span className="sum">{summary(c)}</span>
+                </span>
+              </button>
+              <button className={`sw ${c.bypassed ? '' : 'on'}`} aria-pressed={!c.bypassed} aria-label={`${c.bypassed ? 'Turn on' : 'Bypass'} ${c.name}`} disabled={busy || !!moving} onClick={() => toggle(c)}>
+                <span className="track"><i /></span>
+              </button>
+            </div>
+            {open && <div className="inline-insp">{inspector(c, true)}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const cards = (
+    <div className={`cards ${busy ? 'loading' : ''}`}>
+      {row.cells.map((c) => {
+        if (c.empty) {
+          return (
+            <div key={c.column} className={`bcard emptycard ${moving ? 'target' : ''}`}>
+              <button className="open" onClick={() => tap(c)} disabled={busy} aria-label={`Empty slot ${c.column + 1}, add a block`}>
+                {moving ? 'Move here' : `${two(c.column + 1)} · Empty`}
+              </button>
+            </div>
+          );
+        }
+        const fam = familyOf(c.category);
+        const sel = isSel(c);
+        const b = sel ? bars(c) : [];
+        return (
+          <div key={c.column} className={`bcard ${sel ? 'sel' : ''} ${c.bypassed ? 'byp' : ''}`} style={{ '--fam': fam.color } as CSSProperties}>
+            <button className="open" onClick={() => tap(c)} aria-pressed={sel} disabled={busy || !!moving}>
+              <span className="col">{two(c.column + 1)}</span>
+              <span className="fam">{fam.label}</span>
+              <span className="nm">{c.name}</span>
+              <span className="foot">
+                {b.map((v, i) => <span key={i} className="bar"><i style={{ width: `${Math.round(v * 100)}%` }} /></span>)}
+                <span className="note">{c.bypassed ? (c.bypassPerScene ? 'Bypassed in this scene' : 'Bypassed') : sel ? '' : summary(c).split(' · ')[0]}</span>
+              </span>
+            </button>
+            <button className={`sw ${c.bypassed ? '' : 'on'}`} aria-pressed={!c.bypassed} aria-label={`${c.bypassed ? 'Turn on' : 'Bypass'} ${c.name}`} disabled={busy || !!moving} onClick={() => toggle(c)}>
+              <span className="track"><i /></span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <ParamControl p={p} label={label} disabled={disabled} onError={onError}
-      onSet={(w) => connection.store.setParam(cell.row, cell.column, p.index, w, label)}
-      onNudge={(next) => connection.store.nudgeParam(cell.row, cell.column, p.index, next, label)} />
+    <>
+      {desktop ? (
+        <div className="preset">
+          <div>
+            {laneBar}
+            {banners}
+            {cards}
+          </div>
+          <aside className="inspector" aria-label="Block details">
+            {selCell ? inspector(selCell, false) : <p className="insp-empty">Select a block to see and change its parameters.</p>}
+          </aside>
+        </div>
+      ) : (
+        <>
+          {laneBar}
+          {banners}
+          {list}
+        </>
+      )}
+      {picking && <BlockPicker {...picking} onClose={() => setPicking(null)} />}
+      {scenes && <SceneSheet onClose={() => setScenes(false)} />}
+      {laneSheet && <LaneSheet row={lane} onClose={() => setLaneSheet(false)} />}
+    </>
   );
 }

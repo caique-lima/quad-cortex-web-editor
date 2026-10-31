@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { type GridParam } from '@qc/domain';
 import { optionNames, optionToWire, optionCount, stepWire } from '@qc/protocol';
 
@@ -33,7 +34,7 @@ export function ParamControl({ p, label, disabled, onSet, onNudge, onError }: {
       {editable && nOptions === undefined && (
         <div className="slider">
           <button disabled={disabled} aria-label={`${label} down`} onClick={() => nudge(-1)}>−</button>
-          <input type="range" min={0} max={1} step={step} value={wire} disabled={disabled} aria-label={label} onChange={(e) => set(Number(e.target.value))} />
+          <input type="range" min={0} max={1} step={step} value={wire} disabled={disabled} aria-label={label} style={{ '--pct': `${Math.round((wire ?? 0) * 100)}%` } as CSSProperties} onChange={(e) => set(Number(e.target.value))} />
           <button disabled={disabled} aria-label={`${label} up`} onClick={() => nudge(1)}>+</button>
         </div>
       )}
