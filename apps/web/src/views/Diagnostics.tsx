@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { deleteSnapshot, downloadSnapshot, listSnapshots, type StoredSnapshot } from '../snapshots';
-import { slotLabel } from '@qc/domain';
+import { isDownloadsFolder, isPluginFolder, pluginName, slotLabel, type Folder } from '@qc/domain';
 import { RestoreSheet } from './RestoreSheet';
 import { Support } from './Support';
 import { CC_VERSION, connection, useConnection, useDevice } from '../connection';
+
+/** One line per folder the unit listed: key, name, flags, presets — for checking how the Library sorts real listings. */
+function folderLines(folders: ReadonlyMap<string, Folder>): string[] {
+  return [...folders.values()].sort((a, b) => a.key.localeCompare(b.key)).map((f) => {
+    const named = [...f.slots.values()].filter((s) => s.name).length;
+    const flags = [f.isFactory && 'factory', f.isPlugin && 'plugin-flag', isPluginFolder(f) && 'plugin', isDownloadsFolder(f) && 'downloads', f.isCloud && 'cloud', f.isFavorites && 'favorites'].filter(Boolean).join(',');
+    const sample = [...f.slots.values()].find((s) => s.name);
+    return `${f.key} | “${f.name}” | ${f.kind}${flags ? ` ${flags}` : ''}${f.parentKey ? ` | parent ${f.parentKey}` : ''} | ${named}/${f.slots.size} named${pluginName(f, folders) ? ` | plugin “${pluginName(f, folders)}”` : ''}${sample ? ` | e.g. ${sample.key ?? '(no key)'}` : ''}`;
+  });
+}
 
 export function Diagnostics() {
   const c = useConnection();
@@ -42,6 +52,11 @@ export function Diagnostics() {
             ))}
           </ul>
         )}
+      </div>
+      <div className="card">
+        <h2>Folders ({dev.folders.size})</h2>
+        <button onClick={() => navigator.clipboard.writeText(folderLines(dev.folders).join('\n'))}>Copy</button>
+        <pre className="log">{folderLines(dev.folders).join('\n')}</pre>
       </div>
       <div className="card">
         <h2>Messages received</h2>

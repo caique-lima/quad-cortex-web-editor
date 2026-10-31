@@ -9,6 +9,12 @@ const A = pa.MessageAction_Enum;
 const USER = '/media/p4/Presets/My Presets';
 const FACTORY = '/opt/neuraldsp/Factory Library/';
 
+/** Synthetic plugin banks: plugin -> category folder -> preset names. */
+const PLUGINS: Record<string, Record<string, string[]>> = {
+  'Archetype Demo X': { Ambient: ['Glass Pad', 'Long Tail', 'Swell'], Creative: ['Octave Fuzz', 'Glitch Lead'], Rhythm: ['Tight Chug', 'Crunch Rhythm'] },
+  'Demo Bass Suite': { Clean: ['Round Clean', 'Studio DI'], Drive: ['Grind', 'Fuzz Bass'] },
+};
+
 function msg(schema: Parameters<typeof typeFor>[0], init: Record<string, unknown>): InboundMessage {
   const t = typeFor(schema);
   return { type: t, typeName: typeName(t), message: create(schema, init as never), schema, encrypted: false, compressed: false, raw: new Uint8Array(), receivedAt: Date.now() };
@@ -103,11 +109,15 @@ export async function startDemo(store: DeviceStore): Promise<void> {
         emit(msg(pa.PresetDirtyMessageSchema, { action: A.UPDATE, isDirty: dirty }));
       }
       if (t === 'SetlistPosition') {
-        const slot = init.position as number;
+        // Plugin presets are recalled (and reported back) by key, like on the real unit.
+        const pluginKey = init.isPlugin ? init.keyInPluginFolder as string : undefined;
+        const slot = pluginKey ? pluginKey.length : init.position as number;
         setTimeout(() => {
-          emit(msg(pa.SetlistPositionMessageSchema, { action: A.UPDATE, folderKey: init.folderKey, position: slot, isFactory: init.isFactory }));
+          emit(msg(pa.SetlistPositionMessageSchema, pluginKey
+            ? { action: A.UPDATE, isPlugin: true, keyInPluginFolder: pluginKey }
+            : { action: A.UPDATE, folderKey: init.folderKey, position: slot, isFactory: init.isFactory }));
           emit(msg(pa.SceneMessageSchema, { action: A.UPDATE, selectedScene: 0 }));
-          current = makePreset(`${NAMES[slot % NAMES.length]} ${slot}`, catalog, slot);
+          current = makePreset(pluginKey ? pluginKey.split('/').pop()!.replace(/\.pb$/, '') : `${NAMES[slot % NAMES.length]} ${slot}`, catalog, slot);
           history = []; redoStack = []; emitHistory();
           scene = 0;
           emit(msg(pa.PresetDirtyMessageSchema, { action: A.UPDATE, isDirty: false }));
@@ -234,6 +244,12 @@ export async function startDemo(store: DeviceStore): Promise<void> {
   const listing = (named: number) => Array.from({ length: SLOT_COUNT }, (_, i) => (i < named ? { index: i, name: `${NAMES[i % NAMES.length]} ${i}`, key: `${i}.pb`, instrument: 1 } : { index: i }));
   emit(msg(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: USER, name: 'My Presets', files: listing(70) } }));
   emit(msg(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: FACTORY, name: 'Factory Library', isFactory: true, files: listing(256) } }));
+  for (const [plugin, categories] of Object.entries(PLUGINS)) {
+    for (const [category, names] of Object.entries(categories)) {
+      const key = `/opt/neuraldsp/Plugins/${plugin}/Presets/${category}`;
+      emit(msg(pa.FileMessageSchema, { action: A.UPDATE, folder: { key, name: category, isPlugin: true, files: names.map((name, index) => ({ index, name, key: `${key}/${name}.pb`, instrument: 1 })) } }));
+    }
+  }
   emit(msg(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: '/media/p4/Neural Captures/Mine', name: 'Captures', files: listing(5) } }));
   emit(msg(pa.SetlistPositionMessageSchema, { action: A.UPDATE, folderKey: USER, position: 2, isFactory: false }));
   setTimeout(() => { emit(msg(pa.RecallPresetMessageSchema, { action: A.UPDATE, preset: clone(P.BinaryPresetSchema, current) })); emit(msg(pa.PresetDirtyMessageSchema, { action: A.UPDATE, isDirty: false })); }, 1200);

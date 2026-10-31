@@ -21,7 +21,7 @@ export function Perform({ pins, onError }: { pins: Pin[]; onError: (e: unknown) 
   const go = (slot: Slot | undefined) => {
     if (!slot || !pos || !folder) return;
     if (dev.dirty && !confirm('The current preset has unsaved changes. Loading another preset discards them. Continue?')) return;
-    connection.store.recall({ folderKey: folder.key, position: slot.index, isFactory: folder.isFactory }).catch(onError);
+    connection.store.recallSlot(folder, slot).catch(onError);
   };
   const vol = dev.io.masterVolume;
 

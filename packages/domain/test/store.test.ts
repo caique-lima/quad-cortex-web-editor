@@ -3,6 +3,7 @@ import { pa, schemaFor, Session, typeFor, typeName, type InboundMessage, type Tr
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceStore, folderKind } from '../src/store';
+import { pluginGroups } from '../src/library';
 import { preset } from './helpers';
 
 const A = pa.MessageAction_Enum;
@@ -127,6 +128,30 @@ describe('DeviceStore actions', () => {
 
     s.handle(inbound(pa.RecallPresetMessageSchema, { action: A.UPDATE, preset: preset({}) }));
     expect(s.getSnapshot().loadingPreset).toBe(false);
+  });
+
+  it('recalls plugin and Downloads presets by key, not by folder + position', async () => {
+    const { session, frames } = recordingSession();
+    const s = store();
+    s.attach(session);
+    const plugin = '/opt/neuraldsp/Plugins/Archetype X/Presets/Ambient';
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: plugin, name: 'Ambient', files: [{ index: 0, name: 'Pad', key: `${plugin}/Pad.pb` }] } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: 'cloud-0-1', name: 'Downloads', isDownloads: true, files: [{ index: 3, name: 'Tone', key: 'Tone.pb', cloudId: 'uuid-1' }] } }));
+    const folders = s.getSnapshot().folders;
+    await s.recallSlot(folders.get(plugin)!, folders.get(plugin)!.slots.get(0)!);
+    await s.recallSlot(folders.get('cloud-0-1')!, folders.get('cloud-0-1')!.slots.get(3)!);
+
+    const { Reassembler } = await import('@qc/protocol');
+    const r = new Reassembler();
+    const sent = frames.map((f) => r.push(f)).filter(Boolean).map((f) => fromBinary(schemaFor(f!.messageType)!, f!.payload) as any);
+    expect(sent[0]).toMatchObject({ isPlugin: true, folderKey: plugin, keyInPluginFolder: `${plugin}/Pad.pb` });
+    expect(sent[0].position).toBeUndefined();
+    expect(sent[1]).toMatchObject({ isDownloads: true, keyInDownloads: 'uuid-1' });
+    expect(sent[1].folderKey).toBeUndefined();
+
+    // the unit reports a plugin preset by its key -> placed back on its folder and slot
+    s.handle(inbound(pa.SetlistPositionMessageSchema, { action: A.UPDATE, isPlugin: true, keyInPluginFolder: `${plugin}/Pad.pb` }));
+    expect(s.getSnapshot().position).toMatchObject({ folderKey: plugin, position: 0, pluginKey: `${plugin}/Pad.pb` });
   });
 
   it('selectScene validates and sends Scene UPDATE', async () => {
@@ -871,5 +896,28 @@ describe('DeviceStore branching', () => {
     await expect(s.setSplit(1, 0, 7)).rejects.toThrow(/only lanes 1 and 3/);
     await expect(s.setSplit(0, 4, 2)).rejects.toThrow(/rejoin after/);
     expect(sent()).toHaveLength(0);
+  });
+});
+
+describe('plugin folders in the library', () => {
+  it('groups plugin preset folders by plugin, by path or by parent folder', () => {
+    const s = store();
+    const P = '/opt/neuraldsp/Plugins';
+    const named = (name: string) => [{ index: 0, name, key: `${name}.pb` }];
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: `${P}/ArchPlini`, name: 'Archetype: Plini X', files: [] } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: `${P}/ArchPlini/Presets/Creative`, name: 'Creative', files: named('a') } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: `${P}/ArchPlini/Presets/Ambient`, name: 'Ambient', files: named('b') } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: `${P}/Nolly/Presets/Ambient`, name: 'Ambient', files: named('c') } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: `${P}/Nolly/Presets/Empty`, name: 'Empty', files: [{ index: 0 }] } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: 'p1', name: 'Some Plugin', isPlugin: true, files: [] } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: 'p1/rock', parentKey: 'p1', name: 'Rock', isPlugin: true, files: named('d') } }));
+    s.handle(inbound(pa.FileMessageSchema, { action: A.UPDATE, folder: { key: '/media/p4/Presets/My Presets', name: 'My Presets', files: named('e') } }));
+
+    const groups = pluginGroups(s.getSnapshot().folders).map((g) => [g.name, g.folders.map((f) => f.name)]);
+    expect(groups).toEqual([
+      ['Archetype: Plini X', ['Ambient', 'Creative']], // named after the plugin's own folder
+      ['Nolly', ['Ambient']], // no folder for the plugin itself -> the path; the empty folder is left out
+      ['Some Plugin', ['Rock']], // flagged by the unit, outside the Plugins path -> the parent folder
+    ]);
   });
 });

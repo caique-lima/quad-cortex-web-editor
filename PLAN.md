@@ -124,7 +124,8 @@ Global settings (GeneralSettings, IOSettings, Global EQ, master volume), footswi
 4. ~~Param values shown raw~~ DONE: `packages/protocol/src/values.ts` converts wire→display (skew law, firmware constants, list options, ±50 labelled knobs, refuses unknown bounds/NaN). Formulas match pyquadcortex's hardware readings (tests). STILL UNVERIFIED vs your screen: number of decimals shown (my heuristic from `steps`/`showAsInteger`/range), unit suffixes, and that 4.1.0's catalog has no new symbolic bounds/skews (they'd show ⚠ and the Diagnostics tab lists catalog warnings once surfaced).
 5. Recalling a FACTORY preset: upstream says the factory folder key has a trailing slash on recall; we pass the listed key as-is.
 6. Recall + scene switching send real commands (SetlistPosition/Scene UPDATE). Recall discards unsaved edits on the unit (UI confirms when `PresetDirty`).
-7. Block catalog tested against a 4.0.1 capture; 4.1.0 may add models/params.
+7. Plugin-bank presets (e.g. an Archetype's Ambient/Creative folders) and Downloads presets are recalled by key (`is_plugin` + `folder_key` + `key_in_plugin_folder`; `is_downloads` + `key_in_downloads` = `cloud_id`), per qc-mcp and tetrad. Folder + position for these makes the unit load an empty "Unsaved" preset (seen on the owner's unit). The by-key shape is not yet confirmed on our unit, and neither is the `SetlistPosition` push that follows.
+8. Block catalog tested against a 4.0.1 capture; 4.1.0 may add models/params.
 
 ### Editing: unverified (check on the real unit, on a scratch preset)
 1. The write shapes come from pyquadcortex (verified there on CorOS 4.0.1) — never yet sent to YOUR 4.1.0 unit. A silent refusal shows as "The unit did not apply this change".

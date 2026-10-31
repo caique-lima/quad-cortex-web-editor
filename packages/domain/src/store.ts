@@ -7,6 +7,7 @@ import {
   bypassEditMessage, blockTarget, describeTarget, moveBlockMessage, paramEditMessageFor, paramPromoteMessage, placeBlockMessage, placeRefusal, readBypass, readCellHash, readParamAt, targetKey, type ParamTarget,
   removeBlockMessage, lanePortMessage, readLanePort, readSplit, splitMessage, withLanePort, withSplit, type LaneSide, sceneColorMessage, sceneCopyMessage, sceneLabelMessage, withBypass, withoutBlock, withParamAt, withSceneColor, withSceneLabel,
 } from './edits';
+import { slotLabel } from './slots';
 
 export type FolderKind = 'presets' | 'captures' | 'irs' | 'other';
 
@@ -17,6 +18,8 @@ export interface Slot {
   key?: string;
   instrument?: number;
   readOnly?: boolean;
+  /** Set on Downloads (cloud) presets; the unit loads those by this id. */
+  cloudId?: string;
 }
 
 export interface Folder {
@@ -37,6 +40,9 @@ export interface SetlistPosition {
   folderKey: string;
   position: number;
   isFactory: boolean;
+  /** Plugin and Downloads presets are not setlist slots: the unit loads them by key and ignores folder + position. */
+  pluginKey?: string;
+  downloadsKey?: string;
 }
 
 export interface DeviceInfo {
@@ -99,6 +105,29 @@ export function folderKind(key: string): FolderKind {
   return 'other';
 }
 
+/** Plugin banks (e.g. an Archetype's Ambient, Creative… folders) live under /opt/neuraldsp/Plugins; the path counts in case the flag is missing. */
+export function isPluginFolder(f: Folder): boolean {
+  return f.isPlugin || /^\/opt\/neuraldsp\/Plugins\//i.test(f.key);
+}
+export function isDownloadsFolder(f: Folder): boolean {
+  return f.isDownloads || /^cloud-/i.test(f.key);
+}
+
+/** What to send to load `slot` of `folder`: setlists by folder + position, plugin and Downloads presets by their key. */
+export function recallTarget(folder: Folder, slot: Slot): SetlistPosition {
+  const target: SetlistPosition = { folderKey: folder.key, position: slot.index, isFactory: folder.isFactory };
+  if (isDownloadsFolder(folder)) {
+    const key = slot.cloudId ?? slot.key;
+    if (!key) throw new Error(`The unit did not list a key for “${slot.name ?? slotLabel(slot.index)}”, so it can't be loaded from here.`);
+    return { ...target, downloadsKey: key };
+  }
+  if (isPluginFolder(folder)) {
+    if (!slot.key) throw new Error(`The unit did not list a key for “${slot.name ?? slotLabel(slot.index)}”, so it can't be loaded from here.`);
+    return { ...target, pluginKey: slot.key };
+  }
+  return target;
+}
+
 export interface StoreOptions {
   /** Batch change notifications. 0 = synchronous (tests). */
   notifyDelayMs?: number;
@@ -159,6 +188,8 @@ export class DeviceStore {
   private lastEditSentAt = 0;
   private snapshotSink?: (snapshot: PresetSnapshot) => Promise<void>;
   /** The preset exactly as stored in its slot: set only when a fresh recall was followed by 'not dirty' and no local edits. */
+  /** The last recall we sent, to place the unit's echo if the slot isn't in the listing yet. */
+  private requested?: SetlistPosition;
   private baseline?: { preset: P.BinaryPreset; folderKey: string; position: number };
   private candidate?: P.BinaryPreset;
   private editedSinceCandidate = false;
@@ -212,6 +243,7 @@ export class DeviceStore {
     const s = this.requireSession();
     this.dropPendingEdits();
     this.baseline = undefined;
+    this.requested = pos;
     this.set({ loadingPreset: true, lastError: undefined });
     clearTimeout(this.recallTimer);
     this.recallTimer = setTimeout(
@@ -221,10 +253,15 @@ export class DeviceStore {
     await s.send(pa.SetlistPositionMessageSchema, {
       action: pa.MessageAction_Enum.UPDATE,
       requestId: s.newRequestId(),
-      folderKey: pos.folderKey,
-      position: pos.position,
-      isFactory: pos.isFactory,
+      ...(pos.downloadsKey !== undefined ? { isDownloads: true, keyInDownloads: pos.downloadsKey }
+        : pos.pluginKey !== undefined ? { isPlugin: true, folderKey: pos.folderKey, keyInPluginFolder: pos.pluginKey }
+        : { folderKey: pos.folderKey, position: pos.position, isFactory: pos.isFactory }),
     });
+  }
+
+  /** Load a preset as listed in the library. */
+  async recallSlot(folder: Folder, slot: Slot): Promise<void> {
+    await this.recall(recallTarget(folder, slot));
   }
 
   async selectScene(scene: number): Promise<void> {
@@ -755,7 +792,7 @@ export class DeviceStore {
     if (!folder) return 'That folder is not known to the unit.';
     if (folder.kind !== 'presets') return 'Only preset folders can hold presets.';
     if (folder.isFactory) return 'Factory presets are read-only.';
-    if (folder.isDownloads || folder.isCloud || folder.isPlugin || folder.isFavorites) return 'That folder is managed by the unit and cannot be saved into.';
+    if (isDownloadsFolder(folder) || folder.isCloud || isPluginFolder(folder) || folder.isFavorites) return 'That folder is managed by the unit and cannot be saved into.';
     if (!Number.isInteger(index) || index < 0 || index > 255) return 'The slot must be between 1A and 32H.';
     if (folder.slots.get(index)?.readOnly) return 'That slot is read-only.';
     return undefined;
@@ -885,11 +922,11 @@ export class DeviceStore {
           if (w) { clearTimeout(w.timer); w.resolve(m.preset); }
         }
         break;
-      case 'SetlistPosition':
-        if (m.folderKey !== undefined && m.position !== undefined) {
-          this.set({ position: { folderKey: m.folderKey, position: m.position, isFactory: m.isFactory === true } });
-        }
+      case 'SetlistPosition': {
+        const pos = this.positionFromPush(m);
+        if (pos) this.set({ position: pos });
         break;
+      }
       case 'Grid':
         // The unit echoes our own edits (same request id) and pushes a Grid message when something changes on the unit itself.
         // We don't try to interpret foreign shapes: just re-read the live preset. Meter updates are not edits.
@@ -945,6 +982,20 @@ export class DeviceStore {
     }
   }
 
+  /** A plugin or Downloads preset is reported by its key: find it in the listing (or in the recall we just sent). */
+  private positionFromPush(m: any): SetlistPosition | undefined {
+    const key: string | undefined = m.isPlugin ? m.keyInPluginFolder : m.isDownloads ? m.keyInDownloads : undefined;
+    if (key) {
+      for (const f of this.latestFolders().values()) {
+        for (const slot of f.slots.values()) if (slot.key === key || slot.cloudId === key) return recallTarget(f, slot);
+      }
+      const r = this.requested;
+      return r && (r.pluginKey === key || r.downloadsKey === key) ? r : undefined;
+    }
+    if (m.folderKey !== undefined && m.position !== undefined) return { folderKey: m.folderKey, position: m.position, isFactory: m.isFactory === true };
+    return undefined;
+  }
+
   private mergeFolder(action: number, f: any): void {
     if (!f.key) return;
     const files: any[] = f.files ?? [];
@@ -960,7 +1011,7 @@ export class DeviceStore {
     } else {
       files.forEach((file, n) => {
         const index = file.index ?? n;
-        slots.set(index, { index, name: file.name || undefined, key: file.key, instrument: file.instrument, readOnly: file.isReadonly === true ? true : undefined });
+        slots.set(index, { index, name: file.name || undefined, key: file.key, instrument: file.instrument, readOnly: file.isReadonly === true ? true : undefined, cloudId: file.cloudId || undefined });
       });
     }
     this.folderMap.set(f.key, {
