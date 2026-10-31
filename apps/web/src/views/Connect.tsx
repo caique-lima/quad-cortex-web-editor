@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { CC_VERSION, connection, useConnection } from '../connection';
 
 const REPO_URL = import.meta.env.VITE_REPO_URL as string | undefined;
+/** Must match the hostname in index.html, where Google Analytics is loaded. */
+const ANALYTICS_HOST = 'caique-lima.github.io';
 
 export function ConnectScreen() {
   const c = useConnection();
@@ -36,6 +38,11 @@ export function ConnectScreen() {
         Free software under the GNU AGPL-3.0, built on community research into the Quad Cortex's USB protocol.
         {REPO_URL && <> <a href={REPO_URL} target="_blank" rel="noreferrer">Source code</a>.</>}
       </p>
+      {location.hostname === ANALYTICS_HOST && (
+        <p className="muted small">
+          This site counts visits with Google Analytics (page views only). Nothing from your unit or your presets is sent: that stays in your browser.
+        </p>
+      )}
       {c.log.length > 0 && (
         <details className="card">
           <summary>Log</summary>
