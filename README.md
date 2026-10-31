@@ -79,6 +79,10 @@ Notes:
 - The workflow sets `BASE_PATH` (the app lives under `/<repo>/`) and `VITE_REPO_URL` (the "Source code" link the app shows). To reproduce locally: `BASE_PATH=/quad-cortex-web-editor/ npm run build`, then `BASE_PATH=/quad-cortex-web-editor/ npm run preview -w @qc/web` (preview needs the same variable).
 - Snapshots live in the browser's IndexedDB for the site's address; `localhost` and the Pages site each have their own.
 
+## Support
+
+It's free and open source. If it's useful to you, you can [buy the author a coffee](https://buymeacoffee.com/caiquelima). Entirely optional.
+
 ## Credits and license
 
 Licensed **AGPL-3.0-or-later** (see `LICENSE`). The protocol schema and the wire-format knowledge come from

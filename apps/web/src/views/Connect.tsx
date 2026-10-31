@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { CC_VERSION, connection, useConnection } from '../connection';
+import { Support } from './Support';
 
 const REPO_URL = import.meta.env.VITE_REPO_URL as string | undefined;
 /** Must match the hostname in index.html, where Google Analytics is loaded. */
@@ -13,14 +14,14 @@ export function ConnectScreen() {
   return (
     <main className="page">
       <h1>Quad Cortex Web Editor</h1>
-      <p className="muted">Unofficial — not affiliated with Neural DSP. Early version: browse presets, load them and switch scenes.</p>
+      <p className="muted">Unofficial — not affiliated with Neural DSP. Browse and edit presets, scenes, routing and settings over USB. Early software: try new features on a scratch preset.</p>
 
       <div className="card warn">
         <h2>Before you connect</h2>
         <ul>
           <li>Quit <b>Cortex Control</b> — it holds the USB connection exclusively.</li>
           <li>Plug in the Quad Cortex by USB and let it finish booting (about 20 s).</li>
-          <li>This page only reads from the unit, except <i>Load preset</i> and <i>scene</i> switching, which do what the unit's own screen does. Nothing is saved.</li>
+          <li>Edits are applied <b>live on the unit</b> and are <b>not saved</b> until you press <i>Save</i>; <i>Discard</i> goes back to the saved version. Back up presets you care about with Cortex Control first.</li>
         </ul>
       </div>
 
@@ -43,6 +44,7 @@ export function ConnectScreen() {
           This site counts visits with Google Analytics (page views only). Nothing from your unit or your presets is sent: that stays in your browser.
         </p>
       )}
+      <Support />
       {c.log.length > 0 && (
         <details className="card">
           <summary>Log</summary>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { deleteSnapshot, downloadSnapshot, listSnapshots, type StoredSnapshot } from '../snapshots';
 import { slotLabel } from '@qc/domain';
 import { RestoreSheet } from './RestoreSheet';
+import { Support } from './Support';
 import { CC_VERSION, connection, useConnection, useDevice } from '../connection';
 
 export function Diagnostics() {
@@ -53,6 +54,7 @@ export function Diagnostics() {
         <button onClick={() => navigator.clipboard.writeText(c.log.join('\n'))}>Copy</button>
         <pre className="log">{c.log.join('\n')}</pre>
       </div>
+      <div className="card"><Support /></div>
       {restoring && <RestoreSheet snapshot={restoring} onClose={() => setRestoring(null)} />}
     </div>
   );

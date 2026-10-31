@@ -112,3 +112,9 @@ button.rowlabel { min-height: 0; height: 100%; min-width: 18px; padding: 0 2px; 
 .tabs { grid-template-columns: repeat(4, 1fr); }
 .iorow { padding: 8px 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .iorow:first-of-type { border-top: 0; }
+
+.support summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.support .supportbody { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.support img { border-radius: 8px; background: #fff; padding: 4px; }
+a.coffee { display: inline-block; padding: 10px 16px; border-radius: 10px; background: #ffdd00; color: #111; font-weight: 600; text-decoration: none; }
+.card .support { margin: 0; }
