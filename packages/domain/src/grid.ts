@@ -1,5 +1,5 @@
 import type { preset as P } from '@qc/protocol';
-import { formatValue, type Catalog, type CatalogModel, type CatalogParam, type Display } from '@qc/protocol';
+import { CABSIM_CATEGORIES, formatValue, wireModel, type Catalog, type CatalogModel, type CatalogParam, type Display } from '@qc/protocol';
 
 export const GRID_ROWS = 4;
 export const GRID_COLS = 8;
@@ -70,10 +70,21 @@ function lookupBypass(preset: P.BinaryPreset, row: number, column: number, scene
 }
 
 /** Convert a container's wire params into displayable ones (shared by blocks and lane controls). */
-export function toGridParams(params: P.Param[], cat: CatalogModel | undefined, scene: number): GridParam[] {
-  return params.map((p, i) => {
+export function toGridParams(params: P.Param[], cat: CatalogModel | undefined, scene: number, catalog?: Catalog): GridParam[] {
+  // A cab's wire indices follow a shared layout, not the block's own short entry (see wireModel).
+  const wm = wireModel(catalog, cat);
+  // Cabs carry every setting once per mic, and a Dual IR loader once per IR: tell the copies apart by number. Only when both
+  // copies are actually shown (a Single loader keeps its plain names).
+  const prefix = cat && CABSIM_CATEGORIES.has(cat.category) ? 'MIC' : cat?.category === 'IRLoaders' ? 'IR' : undefined;
+  const out = params.map((p, i) => {
     const index = p.index ?? i;
-    const meta = cat?.params[index];
+    let meta = wm?.params[index];
+    if (meta && prefix) {
+      // numbered by position in the layout, so a short or partial list can never call copy 2 "copy 1"
+      const same = wm!.params.map((q, qi) => ({ q, qi })).filter((x) => x.q.name === meta!.name && !x.q.hidden);
+      const n = same.findIndex((x) => x.qi === index) + 1;
+      if (same.length > 1 && n > 0) meta = { ...meta, name: `${prefix} ${n} ${meta.name}` };
+    }
     const value = paramValue(p, scene);
     return {
       index,
@@ -87,6 +98,31 @@ export function toGridParams(params: P.Param[], cat: CatalogModel | undefined, s
       expression: p.expression && p.expression > 0 ? p.expression : undefined,
     };
   });
+  return cat?.category === 'IRLoaders' && wm ? surfaceIrSlots(out, wm) : out;
+}
+
+/**
+ * An IR loader keeps its IR fields hidden in the catalog (IR PATH and IR NAME, two slots each). Show what is loaded in each slot
+ * the model really uses (Single: 1, Dual: 2) as a read-only "IR n" row at the top. The IR NAME is the readable one; if it is
+ * empty the path is shown instead. Choosing a different IR is a text write, which this app does not do.
+ */
+function surfaceIrSlots(list: GridParam[], wm: CatalogModel): GridParam[] {
+  const named = (n: string) => list.filter((p) => p.meta?.name === n);
+  const names = named('IR NAME');
+  const paths = named('IR PATH');
+  const levels = wm.params.filter((q) => q.name === 'LEVEL'); // a slot is in use if its LEVEL is not hidden
+  const text = (p: GridParam | undefined) => (typeof p?.value === 'string' ? p.value.trim() : '');
+  const rows: GridParam[] = [];
+  for (let k = 0; k < 2; k++) {
+    if (levels[k]?.hidden) continue;
+    const chosen = text(names[k]) ? names[k] : text(paths[k]) ? paths[k] : (names[k] ?? paths[k]);
+    if (!chosen) continue;
+    chosen.hidden = false;
+    chosen.name = `IR ${k + 1}`;
+    if (!text(chosen)) chosen.display = { text: 'None loaded', converted: true };
+    rows.push(chosen);
+  }
+  return [...rows, ...list.filter((p) => !rows.includes(p))];
 }
 
 export interface LaneControls {
@@ -147,7 +183,7 @@ export function buildGrid(preset: P.BinaryPreset, catalog: Catalog | undefined, 
         bypassPerScene: perScene,
         params: empty
           ? []
-          : toGridParams(model!.params, cat, scene),
+          : toGridParams(model!.params, cat, scene, catalog),
       });
     }
     const sp = chain?.splitControlPoints[0];

@@ -1,7 +1,7 @@
 // Demo mode (?demo): drives the real DeviceStore/UI from a fake unit so the interface can be developed and tested
 // without hardware. Uses the real block catalog captured from a CorOS 4.0.1 unit; presets and listings are synthetic.
 import { clone, create } from '@bufbuild/protobuf';
-import { pa, preset as P, toWire, typeFor, typeName, type Catalog, type InboundMessage, type Session, parseModelRepoPayload } from '@qc/protocol';
+import { pa, preset as P, toWire, wireModel, typeFor, typeName, type Catalog, type InboundMessage, type Session, parseModelRepoPayload } from '@qc/protocol';
 import { SLOT_COUNT, type DeviceStore } from '@qc/domain';
 import catalogUrl from '../../../packages/protocol/test/fixtures/model_repo_coros_4_0_1.bin?url';
 
@@ -26,6 +26,8 @@ function makePreset(name: string, catalog: Catalog, seed: number) {
   const cats = catalog.categories.filter((c) => !c.hidden).map((c) => [...catalog.models.values()].filter((m) => m.category === c.name && !m.hidden));
   const pick = (n: number) => { const l = cats[(seed + n * 3) % cats.length]!; return l[(seed + n) % l.length]!; };
   const place: Record<string, ReturnType<typeof pick>> = { '0,0': pick(0), '0,1': pick(1), '0,2': pick(2), '0,4': pick(3), '0,5': pick(4), '0,7': pick(5), '2,1': pick(6), '2,3': pick(7) };
+  const dual = [...catalog.models.values()].find((m) => m.name === 'Dual (M)');
+  if (dual) place['2,2'] = dual as (typeof place)[string]; // an IR loader, so its IR rows can be seen in the demo
   const chains = [0, 1, 2, 3].map((r) => create(P.ChainSchema, {
     inPortid: r === 0 ? 1 : r === 2 ? 2 : 0, outPortid: r === 0 ? 1 : r === 2 ? 2 : 0,
     inputControl: [control(28000, [0.3, 1, 0.5, 0.5])],
@@ -40,9 +42,11 @@ function makePreset(name: string, catalog: Catalog, seed: number) {
       if (!m) return create(P.ModelSchema, {});
       return create(P.ModelSchema, {
         hash: m.id,
-        params: m.params.map((p, i) => create(P.ParamSchema, {
-          index: i, sceneMode: i === 0,
-          paramValues: Array.from({ length: i === 0 ? 8 : 1 }, (_, s) => create(P.ParamValueSchema, { value: { case: 'floatValue', value: ((seed + i + s) % 10) / 10 } })),
+        params: (wireModel(catalog, m) ?? m).params.map((p, i) => create(P.ParamSchema, {
+          index: i, sceneMode: i === 0 && p.type !== 'string',
+          paramValues: p.type === 'string'
+            ? [create(P.ParamValueSchema, { value: { case: 'stringValue', value: p.name === 'IR NAME' ? `Demo Cab ${i === 22 ? 'A' : 'B'} 57` : `${m.name}_${i < 8 ? 'Dynamic 57' : 'Ribbon 160'}` } })]
+            : Array.from({ length: i === 0 ? 8 : 1 }, (_, s) => create(P.ParamValueSchema, { value: { case: 'floatValue', value: 0.2 + (((seed + i + s) % 10) / 10) * 0.6 } })),
         })),
       });
     }),
@@ -130,11 +134,11 @@ export async function startDemo(store: DeviceStore): Promise<void> {
             if (chain.row === 3) continue;
             const cat = catalog.models.get(m.hash);
             target.hash = m.hash;
-            target.params = (cat?.params ?? []).map((cp, i) => {
+            target.params = ((cat && wireModel(catalog, cat)) ?? cat)?.params.map((cp, i) => {
               let w = 0.5;
               try { w = Math.min(1, Math.max(0, toWire(cp, cp.defaultValue))); } catch { /* unconvertible: leave mid */ }
               return create(P.ParamSchema, { index: i, paramValues: [create(P.ParamValueSchema, { value: { case: 'floatValue', value: w } })] });
-            });
+            }) ?? [];
             dirty = true;
             emit(msg(pa.GridMessageSchema, { action: A.UPDATE, requestId: init.requestId, preset: init.preset })); // the echo of an accepted placement
           }

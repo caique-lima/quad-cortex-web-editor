@@ -13,6 +13,9 @@ export function BlockInspector({ cell, pinned, onPin, onReplace, onMove, onRemov
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const locked = dev.loadingPreset;
   const fam = familyOf(cell.category);
+  // Settings the catalog names get controls; values it has no name for are listed quietly, read-only, so nothing is hidden.
+  const named = cell.params.filter((p) => !p.hidden && p.meta);
+  const unnamed = cell.params.filter((p) => !p.hidden && !p.meta);
   const model = cell.hash !== undefined ? dev.catalog?.models.get(cell.hash) : undefined;
   const setBypass = (b: boolean) => { if (b !== cell.bypassed) connection.store.setBypass(cell.row, cell.column, b).catch(fail); };
 
@@ -32,10 +35,17 @@ export function BlockInspector({ cell, pinned, onPin, onReplace, onMove, onRemov
       </div>
       {cell.bypassed && !cell.bypassPerScene && <div className="muted small">This block's bypass applies to all scenes.</div>}
       {error && <div className="inline-err" role="alert">{error}</div>}
-      {cell.params.length === 0 ? <p className="muted">No parameters sent for this block.</p> : (
+      {cell.category === 'IRLoaders' && <div className="muted small">Choosing a different IR is not supported yet. Change it on the unit or in Cortex Control; the loaded IR is shown below.</div>}
+      {named.length === 0 && unnamed.length === 0 ? <p className="muted">No parameters sent for this block.</p> : (
         <div className="params">
-          {cell.params.filter((p) => !p.hidden).map((p) => <ParamRow key={p.index} cell={cell} p={p} disabled={locked} onError={fail} />)}
+          {named.map((p) => <ParamRow key={p.index} cell={cell} p={p} disabled={locked} onError={fail} />)}
         </div>
+      )}
+      {unnamed.length > 0 && (
+        <details className="unnamed">
+          <summary>{unnamed.length} unnamed value{unnamed.length === 1 ? '' : 's'} the unit sends (read-only)</summary>
+          {unnamed.map((p) => <div key={p.index} className="paramhead"><span>#{p.index}</span><b>{p.display.text}</b></div>)}
+        </details>
       )}
       <p className="muted small" style={{ marginTop: 10 }}>
         Live on the unit and not saved until you press Save. Per-scene values change scene {dev.selectedScene + 1} only.

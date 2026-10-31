@@ -48,6 +48,26 @@ export interface Catalog {
   warnings: string[];
 }
 
+// ---- cabs -----------------------------------------------------------------------------------------------------
+// A cab's OWN catalog entry is a short local list (2, 4 or 6 parameters), but the parameters the unit sends are indexed by a
+// shared layout ("Default Cabsim", 21 entries: 0 bypass, 1 ir selector, 2 LEVEL, 3 PAN, 4 DISTANCE, 5 POSITION, ... for mic 1,
+// then the same for mic 2, then HPF, LPF, OUTPUT VOLUME). Settled on hardware by pyquadcortex (writing wire index 2 on a cab
+// moved LEVEL, not the block's own entry 2). 169 of the 174 cab models are like this; the other 5 describe 21 or 31 parameters
+// themselves and are left alone. Everything else (IR loaders, amps, effects) is wire-indexed by its own entry.
+
+export const CABSIM_CATEGORIES: ReadonlySet<string> = new Set(['Cabsim Guitar (M)', 'Cabsim Guitar (ST)', 'Cabsim Bass (M)', 'Cabsim Bass (ST)']);
+export const CABSIM_LAYOUT_MONO = 12000;
+/** Same layout with PAN replaced by BALANCE (-1..1). Using it for stereo cabs is a reasonable reading, not verified upstream. */
+export const CABSIM_LAYOUT_STEREO = 32000;
+
+/** The catalog model whose parameter list is wire-indexed for `model` (usually the model itself; a cab's shared layout otherwise). */
+export function wireModel(catalog: Catalog | undefined, model: CatalogModel | undefined): CatalogModel | undefined {
+  if (!model || !catalog || !CABSIM_CATEGORIES.has(model.category)) return model;
+  const layout = catalog.models.get(model.category.endsWith('(ST)') ? CABSIM_LAYOUT_STEREO : CABSIM_LAYOUT_MONO);
+  if (!layout || model.params.length >= layout.params.length) return model;
+  return layout;
+}
+
 /** Minimal ustar reader: returns the first member whose name ends with `.xml`. */
 export function extractXmlFromTar(tar: Uint8Array): Uint8Array {
   const dec = new TextDecoder();

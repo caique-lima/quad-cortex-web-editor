@@ -14,7 +14,9 @@ const two = (n: number) => String(n).padStart(2, '0');
 
 function summary(c: GridCell): string {
   if (c.bypassed) return c.bypassPerScene ? 'Bypassed in this scene' : 'Bypassed';
-  return c.params.filter((p) => !p.hidden).slice(0, 3).map((p) => `${p.name ?? `#${p.index}`} ${p.display.text}`).join(' · ');
+  const named = c.params.filter((p) => !p.hidden && p.meta);
+  const knobs = named.filter((p) => p.display.converted && p.meta!.type !== 'string' && optionCount(p.meta!) === undefined);
+  return (knobs.length > 0 ? knobs : named).slice(0, 3).map((p) => `${p.name} ${p.display.text}`).join(' · ');
 }
 
 /** Position bars for the first few continuous parameters (0..1 on the knob), shown for the selected block. */
